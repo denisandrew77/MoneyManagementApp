@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, Plus, Trash2, WalletCards } from 'lucide-react';
+import { useAppUpdates } from '../components/AppUpdates';
 import { AppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
 import { analyzePlan, decimalUnits, previewAllocation, type AllocationRow, type AllocationType } from '../lib/budget';
@@ -11,12 +12,14 @@ export function BudgetSetup() {
   const { session } = useAuth();
   const query = useQuery({ queryKey: ['salary-setup', session?.user.id], queryFn: loadBudgetSetup });
   return <AppShell><main className="dashboard budget-page"><Link to="/" className="back-link"><ArrowLeft size={16}/> Back to overview</Link><div className="page-heading"><div><span className="eyebrow muted">MAKE A PLAN</span><h1>Salary & budgets<span className="wave">.</span></h1><p>Give every leu a purpose.</p></div></div>
-    {query.isPending ? <div className="empty-panel" role="status">Loading your plan…</div> : query.isError ? <div className="empty-panel"><h2>We couldn’t load your plan.</h2><p role="alert">{query.error.message}</p><button className="primary-button" onClick={() => query.refetch()}>Try again</button></div> : <BudgetForm key={session!.user.id} initial={query.data}/>}
+    {query.isPending ? <div className="empty-panel" role="status">Loading your plan…</div> : query.isError && !query.data ? <div className="empty-panel"><h2>We couldn’t load your plan.</h2><p role="alert">{query.error.message}</p><button className="primary-button" onClick={() => query.refetch()}>Try again</button></div> : <BudgetForm key={session!.user.id} initial={query.data}/>}
   </main></AppShell>;
 }
 function BudgetForm({ initial }: { initial: BudgetSetupData }) {
   const { session } = useAuth();
   const queryClient = useQueryClient();
+  const { setUpdateBlocked } = useAppUpdates();
+  const [dirty, setDirty] = useState(false);
   const [salary, setSalary] = useState(initial.salary);
   const [rows, setRows] = useState<AllocationRow[]>(initial.rows);
   const [hasSettings, setHasSettings] = useState(initial.hasSettings);
@@ -24,9 +27,18 @@ function BudgetForm({ initial }: { initial: BudgetSetupData }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    setUpdateBlocked(dirty || busy);
+    return () => setUpdateBlocked(false);
+  }, [dirty, busy, setUpdateBlocked]);
+  useEffect(() => {
+    if (!dirty && !busy) {
+      setSalary(initial.salary); setRows(initial.rows); setHasSettings(initial.hasSettings);
+    }
+  }, [initial, dirty, busy]);
   const analysis = analyzePlan(salary, rows);
   const openingValid = hasSettings || decimalUnits(openingCredit.replace(/^-/, ''), 2) !== null;
-  function changed() { setSaved(false); setError(null); }
+  function changed() { setDirty(true); setSaved(false); setError(null); }
   function updateRow(key: string, patch: Partial<AllocationRow>) { changed(); setRows(current => current.map(row => row.key === key ? { ...row, ...patch } : row)); }
   function switchType(row: AllocationRow, type: AllocationType) {
     if (row.type === type) return;
@@ -44,14 +56,14 @@ function BudgetForm({ initial }: { initial: BudgetSetupData }) {
       try {
         const data = await loadBudgetSetup();
         queryClient.setQueryData(['salary-setup', session!.user.id], data);
-        setSalary(data.salary); setRows(data.rows);
+        setSalary(data.salary); setRows(data.rows); setDirty(false);
       } catch { setError('Your plan was saved, but the refreshed values could not be loaded. Reload this screen before editing again.'); }
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not save your plan. Please try again.'); }
     finally { setBusy(false); }
   }
   const fineRemainder = Math.abs(analysis.difference) > 0 && Math.abs(analysis.difference) < .01;
   const differenceLabel = fineRemainder ? `${Math.abs(analysis.difference).toFixed(6)} lei` : money(Math.abs(analysis.difference));
-  return <form onSubmit={submit} className="budget-form">
+  return <form onSubmit={submit} className="budget-form" aria-busy={busy}>
     <fieldset disabled={busy} className="budget-fieldset"><div className="budget-editor">
       <div className="budget-fields"><section className="white-panel salary-panel"><div className="section-heading"><h2>01 · Your expected salary</h2><WalletCards size={20}/></div><p className="field-help">Your monthly take-home amount. Update it whenever your salary changes.</p><label className="field-label" htmlFor="salary">Monthly salary</label><div className="input-suffix salary-input"><input autoComplete="off" id="salary" inputMode="decimal" placeholder="6000.00" value={salary} onChange={e => { changed(); setSalary(e.target.value); }} required aria-describedby="salary-help"/><span>lei / month</span></div><p id="salary-help" className="field-help">Used to calculate budgets; this does not record a bank deposit.</p>
       {!hasSettings && <details className="opening-credit"><summary>Already have money on Flying Blue?</summary><label htmlFor="opening-credit" className="field-label">Starting Flying Blue credit (lei)</label><input className="text-input" id="opening-credit" inputMode="decimal" value={openingCredit} onChange={e => { changed(); setOpeningCredit(e.target.value); }}/><p className="field-help">Your existing credit before any top-ups or expenses you’ll enter. Use a negative value if you owe money.</p></details>}</section>

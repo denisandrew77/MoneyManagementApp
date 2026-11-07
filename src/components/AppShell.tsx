@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, LogOut, SlidersHorizontal, WalletCards } from 'lucide-react';
+import { PullToRefresh } from './PullToRefresh';
 import { supabase } from '../lib/supabase';
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -19,7 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <aside className="sidebar"><NavLink className="brand" to="/"><WalletCards size={26}/> pocket<span className="brand-dot">.</span></NavLink><nav className="sidebar-nav" aria-label="Main navigation">{links}</nav><div className="sidebar-bottom"><span>ONE MONTH AT A TIME</span><p>A little clarity goes a long way.</p></div></aside>
     <div className="app-content"><header className="app-header"><NavLink className="mobile-brand" to="/">pocket.</NavLink><span className="desktop-label">Your money, at a glance</span><button className="sign-out" onClick={signOut} disabled={busy}><LogOut size={16}/>{busy ? 'Signing out…' : 'Sign out'}</button></header>
     {error && <div className="shell-error notice error" role="alert">{error}</div>}
-    {children}
+    <PullToRefresh>{children}</PullToRefresh>
     <nav className="mobile-nav" aria-label="Mobile navigation">{links}</nav></div>
   </div>;
 }

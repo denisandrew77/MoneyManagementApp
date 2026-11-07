@@ -100,3 +100,11 @@ Settings and budget snapshot tables allow direct reads only. Use this RPC to cha
 - Local `/login` and `/auth/callback` routes returned HTTP 200.
 - Live Supabase/Google OAuth and installed-iPhone behavior require your project configuration and were not tested here. The SQL was exercised against embedded Postgres with a minimal Supabase Auth mock; it has not been run against your hosted database.
 - The test runner was upgraded to address its critical advisories. Six low/moderate development-tool dependency advisories remain in the PWA build-tool chain; npm's compatible audit fix did not resolve them. They are not shipped as application runtime dependencies.
+
+## Refresh and application updates
+
+On a touch device, scroll to the top of Overview or Salary & budgets, pull down, and release when “Release to refresh” appears. This fetches fresh active Supabase queries and checks for an app update without reloading the page. The Refresh button provides the same action on desktop and as an accessible alternative. Unsaved salary edits are preserved, including if a background refresh fails. A clean salary form adopts the refreshed saved values.
+
+Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
+
+No SQL changes are needed. Commit and deploy the source changes to enable this on the hosted app. Existing installations need to load this release first; detection then works for subsequent deployments. Service workers run in production builds on HTTPS or localhost, not the Vite development server. To manually verify an update, open a production build, deploy a second build with a visible change, foreground the first app, wait for the banner, then apply it. Verify touch behavior and the update flow on the installed iPhone PWA; those device checks have not been performed in this workspace.

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
@@ -8,12 +8,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const cachedUserId = useRef<string | null>(null);
   useEffect(() => {
     if (!supabase) { setLoading(false); return; }
     let active = true;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
       if (!active) return;
-      queryClient.clear(); setSession(next); setLoading(false);
+      const nextUserId = next?.user.id ?? null;
+      if (cachedUserId.current !== nextUserId) queryClient.clear();
+      cachedUserId.current = nextUserId;
+      setSession(next); setLoading(false);
     });
     supabase.auth.getSession().then(({ data, error: authError }) => {
       if (active) { setSession(data.session); setError(authError?.message ?? null); setLoading(false); }
