@@ -1,10 +1,12 @@
 # Pocket
 
-Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Login and a read-only dashboard are implemented; salary/budget and transaction editing forms are intentionally the next step. No sample financial data is displayed.
+Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, and a salary/category allocation editor are implemented. Transaction editing forms are the next step. No sample financial data is displayed.
 
 ## 1. Create the database
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
+
+Next run `supabase/migrations/002_salary_setup.sql` in the SQL Editor to add the atomic salary setup save function. Existing projects that already ran migration 001 should run only migration 002.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -68,7 +70,13 @@ On iPhone, open the HTTPS URL in Safari → Share → Add to Home Screen → Ope
 - Linked refunds must be explicitly deleted before deleting their expense. A refunded expense's payment source/category cannot be changed until its refunds are removed.
 - Historical salary and allowances stay fixed. Editing a past transaction intentionally updates the spending calculated for that past month.
 
-## Budget RPC (for the future editing UI)
+## Salary & budgets screen
+
+Open **Salary & budgets** in the sidebar or bottom navigation, or visit `/budget`. Enter a positive monthly salary, add/name categories, choose `%` or `lei` for each allocation, and allocate the full salary. The summary updates live; saving updates the current month and future defaults. Previous months retain their salary and allowances. On first setup, optional starting Flying Blue credit is available under the salary field.
+
+New categories and the plan are saved atomically through `save_salary_setup`. The UI supports decimal dots or commas. Removing a category from the plan preserves its historical records; the database prevents removing categories with current-month expenses or refunds.
+
+## Budget RPC
 
 Create categories through the authenticated client, then call:
 
@@ -88,7 +96,7 @@ Settings and budget snapshot tables allow direct reads only. Use this RPC to cha
 ## Verification in this checkout
 
 - TypeScript and production/PWA build passed.
-- Eight embedded-Postgres integration tests passed: category-only deductions, independent top-ups, full/partial refund limits, negative credit, complete salary allocation, historical salary preservation/month rollover, cross-user isolation, and allowlist/anonymous restrictions.
+- Embedded-Postgres integration tests cover: category-only deductions, independent top-ups, full/partial refund limits, negative credit, complete salary allocation, historical salary preservation/month rollover, cross-user isolation, and allowlist/anonymous restrictions.
 - Local `/login` and `/auth/callback` routes returned HTTP 200.
 - Live Supabase/Google OAuth and installed-iPhone behavior require your project configuration and were not tested here. The SQL was exercised against embedded Postgres with a minimal Supabase Auth mock; it has not been run against your hosted database.
 - The test runner was upgraded to address its critical advisories. Six low/moderate development-tool dependency advisories remain in the PWA build-tool chain; npm's compatible audit fix did not resolve them. They are not shipped as application runtime dependencies.

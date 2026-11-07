@@ -21,6 +21,7 @@ beforeAll(async () => {
   grant execute on all functions in schema auth to authenticated,anon;
   insert into auth.users values('${userA}'),('${userB}');`);
   await db.exec(readFileSync('supabase/migrations/001_initial_schema.sql','utf8'));
+  await db.exec(readFileSync('supabase/migrations/002_salary_setup.sql','utf8'));
   await db.exec("insert into private.allowed_emails values ('owner@example.com'),('other@example.com');");
   await asUser(userA,'owner@example.com');
   await db.exec(`insert into public.categories(id,name) values('${catA}','Expenses'),('${catB}','Gas');`);
@@ -69,11 +70,26 @@ describe('Database business rules and access', () => {
     expect(await scalar('select available_credit as value from public.flying_blue_summary')).toBe(-100);
     await expect(db.exec(`insert into public.refunds(expense_id,amount,destination) values('${expense}',0.01,'personal')`)).rejects.toThrow(/exceed/);
   });
+  it('saves new categories and salary atomically and rolls everything back on an invalid split', async () => {
+    const allocations = [
+      { category_id: catA, name: 'Expenses', allocation_type: 'fixed', allocation_value: 5000 },
+      { category_id: catB, name: 'Gas', allocation_type: 'fixed', allocation_value: 1000 },
+      { name: 'Savings', allocation_type: 'percentage', allocation_value: 25 },
+    ];
+    await db.query('select public.save_salary_setup($1,$2::jsonb)', [8000, JSON.stringify(allocations)]);
+    expect(await scalar('select salary as value from public.user_settings')).toBe(8000);
+    expect(await scalar("select count(*) as value from public.categories where name = 'Savings'")).toBe(1);
+    expect(await scalar(`select sum(budget_amount) as value from public.monthly_category_budgets b join public.budget_months m on m.id = b.budget_month_id where m.month = ${month}`)).toBe(8000);
+    await expect(db.query('select public.save_salary_setup($1,$2::jsonb)', [9000,JSON.stringify([{name:'Should roll back',allocation_type:'fixed',allocation_value:1}])])).rejects.toThrow(/full salary/);
+    expect(await scalar("select count(*) as value from public.categories where name = 'Should roll back'")).toBe(0);
+    expect(await scalar('select salary as value from public.user_settings')).toBe(8000);
+  });
   it('isolates users and forbids cross-user category references',async () => {
     await asUser(userB,'other@example.com');
     expect(await scalar('select count(*) as value from public.expenses')).toBe(0);
     expect(await scalar('select count(*) as value from public.flying_blue_summary')).toBe(0);
     await expect(db.exec(`insert into public.expenses(category_id,amount,payment_source) values('${catA}',10,'personal')`)).rejects.toThrow();
+    await expect(db.query('select public.save_salary_setup($1,$2::jsonb)',[100,JSON.stringify([{category_id:catA,name:'Stolen',allocation_type:'percentage',allocation_value:100}])])).rejects.toThrow(/does not belong/);
   });
   it('blocks unapproved emails and anonymous reads',async () => {
     await asUser(userA,'unapproved@example.com');
