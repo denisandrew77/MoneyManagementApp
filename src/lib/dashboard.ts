@@ -1,8 +1,8 @@
 import { supabase } from './supabase';
 import { currentMonth } from './format';
 export interface DashboardData {
-  salary: number; credit: number; topUps: number; spent: number; remaining: number;
-  categories: { id: string; name: string; allowance: number; remaining: number; spent: number }[];
+  salary: number; carryIn: number; credit: number; topUps: number; spent: number; remaining: number;
+  categories: { id: string; name: string; allowance: number; carryIn: number; remaining: number; spent: number }[];
   expenses: { id: string; amount: number; date: string; description: string | null; payment_source: string; category_name: string }[];
   hasSettings: boolean;
 }
@@ -27,8 +27,8 @@ export async function loadDashboard(): Promise<DashboardData> {
   const [settings, budgetMonth, budgets, credit, topUps, expenses, categories] = results;
   const rows = budgets.data ?? [];
   const salary = Number(budgetMonth.data?.salary_snapshot ?? settings.data?.salary ?? 0);
-  return { salary, hasSettings: !!settings.data, credit: Number(credit.data?.available_credit ?? 0), topUps: (topUps.data ?? []).reduce((s, t) => s + Number(t.amount), 0), spent: rows.reduce((s, r) => s + Number(r.net_spent), 0), remaining: rows.length ? rows.reduce((s, r) => s + Number(r.remaining), 0) : salary,
-    categories: rows.map(r => ({ id: r.category_id, name: r.category_name, allowance: Number(r.budget_amount), remaining: Number(r.remaining), spent: Number(r.net_spent) })),
+  return { salary, carryIn: rows.reduce((s, r) => s + Number(r.carry_in ?? 0), 0), hasSettings: !!settings.data, credit: Number(credit.data?.available_credit ?? 0), topUps: (topUps.data ?? []).reduce((s, t) => s + Number(t.amount), 0), spent: rows.reduce((s, r) => s + Number(r.net_spent), 0), remaining: rows.length ? rows.reduce((s, r) => s + Number(r.remaining), 0) : salary,
+    categories: rows.map(r => ({ id: r.category_id, name: r.category_name, allowance: Number(r.budget_amount), carryIn: Number(r.carry_in ?? 0), remaining: Number(r.remaining), spent: Number(r.net_spent) })),
     expenses: (expenses.data ?? []).map(e => ({ ...e, amount: Number(e.amount), category_name: categories.data?.find(c => c.id === e.category_id)?.name ?? 'Category' })),
   };
 }

@@ -1,12 +1,12 @@
 # Pocket
 
-Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, and a salary/category allocation editor are implemented. Transaction editing forms are the next step. No sample financial data is displayed.
+Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, a salary/category allocation editor, and expense entry are implemented. Expense editing, top-up entry, and refund entry forms are future work. No sample financial data is displayed.
 
 ## 1. Create the database
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
 
-Next run `supabase/migrations/002_salary_setup.sql` in the SQL Editor to add the atomic salary setup save function. Existing projects that already ran migration 001 should run only migration 002.
+Next run migrations `002_salary_setup.sql` and `003_expenses_and_budget_carryover.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -63,8 +63,8 @@ On iPhone, open the HTTPS URL in Safari → Share → Add to Home Screen → Ope
 - Every expense affects only its selected category. Flying Blue expenses additionally reduce available Flying Blue credit.
 - Top-ups affect credit only. Credit carries forward across months and may go negative.
 - A refund is linked to one expense, inherits its category, and restores budget in the refund's month. Its actual destination determines whether Flying Blue credit increases. Partial refunds are supported; the combined amount cannot exceed the purchase amount.
-- Category spending may exceed its allowance. Unused allowance does not roll over.
-- Budget snapshots preserve past salary and allocations. Saving a plan updates the current month and defaults for future months. `ensure_current_month()` creates the current month's snapshot on dashboard load; no scheduled job is required. Months when the app is never opened are not materialized automatically.
+- Category spending may exceed its allowance. Only a negative month-end category balance rolls forward, reducing the next month’s allowance; unused positive allowance resets. This applies separately to each category and can continue across multiple months.
+- Budget snapshots preserve past salary and allocations. Saving a plan updates the current month and defaults for future months. `ensure_current_month()` creates the current month's snapshot on dashboard load; no scheduled job is required. Months when the app is never opened are not materialized automatically; the carryover view calculates those intervening months using the latest saved plan at that point in time. An explicit plan omitting a category assigns it zero allowance while preserving any outstanding debt.
 - Opening credit is your net Flying Blue credit immediately before your first tracked transactions. It must not include top-ups already entered in the app.
 - All amounts are exact RON decimals. Percent allocations recalculate with salary; fixed allocations retain their amount. A complete plan must allocate the full salary. Rounding residue goes to the largest category.
 - Linked refunds must be explicitly deleted before deleting their expense. A refunded expense's payment source/category cannot be changed until its refunds are removed.
@@ -105,6 +105,28 @@ Settings and budget snapshot tables allow direct reads only. Use this RPC to cha
 
 On a touch device, scroll to the top of Overview or Salary & budgets, pull down, and release when “Release to refresh” appears. This fetches fresh active Supabase queries and checks for an app update without reloading the page. The Refresh button provides the same action on desktop and as an accessible alternative. Unsaved salary edits are preserved, including if a background refresh fails. A clean salary form adopts the refreshed saved values.
 
-Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
+Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary or expense form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
 
 No SQL changes are needed. Commit and deploy the source changes to enable this on the hosted app. Existing installations need to load this release first; detection then works for subsequent deployments. Service workers run in production builds on HTTPS or localhost, not the Vite development server. To manually verify an update, open a production build, deploy a second build with a visible change, foreground the first app, wait for the banner, then apply it. Verify touch behavior and the update flow on the installed iPhone PWA; those device checks have not been performed in this workspace.
+
+
+## Add expense and negative budget carryover
+
+Run `supabase/migrations/003_expenses_and_budget_carryover.sql` in Supabase SQL Editor after migrations 001 and 002, then deploy the frontend. No existing rows are deleted. The migration is safe to re-run.
+
+Use **Add expense** in the navigation or the dashboard, or open `/expenses/new`. Enter an amount, select Personal or Flying Blue, select a budget category, choose a date in the current month up to today. Comma and dot decimals are supported. A live warning and **Save expense anyway** button appear if the purchase would leave the category negative. The warning never blocks a valid expense. A confirmation shows the saved category remainder; the overview refreshes after saving.
+
+The save RPC checks ownership and preserves RLS. A client-generated expense ID makes retries with identical details idempotent, avoiding duplicate spending after a lost response. Reusing that ID for different details is rejected.
+
+For each category:
+
+```text
+Carry-in = min(previous month’s remaining balance, 0)
+Remaining = monthly allowance + carry-in − expenses + refunds received this month
+```
+
+For example: Gas allowance 500 lei, ending at −200 lei, starts the next month with 300 lei available. Spending 400 lei then leaves −100 lei. A later month’s allowance covers that debt; positive leftover money does not carry forward. An omitted category keeps its debt with zero new allowance until it is allocated money again or receives a refund. Each month’s saved salary and allowances are preserved, while derived remainders reflect historical transaction edits.
+
+The dashboard’s monthly total is now salary plus category carry-ins, minus current-month expenses, plus current-month refunds. Flying Blue credit remains an independent running balance and is not reduced again when category debt carries forward.
+
+Verification: production build and 30 tests passed, including multi-month carryover, unopened months, surplus reset, removed-category debt, full/partial refund rules, retry idempotency, and cross-user isolation. The migration was tested against embedded Postgres; apply it to your hosted Supabase project before using expense entry. Live production and iPhone form testing still require the deployed release.
