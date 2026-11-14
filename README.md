@@ -1,12 +1,12 @@
 # Pocket
 
-Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, a salary/category allocation editor, expense entry, and Flying Blue top-ups are implemented. Expense editing and refund entry forms are future work. No sample financial data is displayed.
+Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, a salary/category allocation editor, expense entry, Flying Blue top-ups, transaction history, editing/deletion, and full/partial refunds are implemented. No sample financial data is displayed.
 
 ## 1. Create the database
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
 
-Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, and `004_flying_blue_top_ups.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
+Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, `004_flying_blue_top_ups.sql`, and `005_transaction_history_and_refunds.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -105,7 +105,7 @@ Settings and budget snapshot tables allow direct reads only. Use this RPC to cha
 
 On a touch device, scroll to the top of Overview or Salary & budgets, pull down, and release when “Release to refresh” appears. This fetches fresh active Supabase queries and checks for an app update without reloading the page. The Refresh button provides the same action on desktop and as an accessible alternative. Unsaved salary edits are preserved, including if a background refresh fails. A clean salary form adopts the refreshed saved values.
 
-Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary, expense, or top-up form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
+Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while a salary, expense, or top-up form contains unsaved edits or is saving, or while a transaction action dialog is open. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
 
 No SQL changes are needed. Commit and deploy the source changes to enable this on the hosted app. Existing installations need to load this release first; detection then works for subsequent deployments. Service workers run in production builds on HTTPS or localhost, not the Vite development server. To manually verify an update, open a production build, deploy a second build with a visible change, foreground the first app, wait for the banner, then apply it. Verify touch behavior and the update flow on the installed iPhone PWA; those device checks have not been performed in this workspace.
 
@@ -147,3 +147,18 @@ Available credit = starting credit + top-ups − all Flying Blue expenses + refu
 A 600 lei top-up followed by a 500 lei Flying Blue expense leaves 100 lei available. Only the expense uses the selected category’s budget. A top-up has no category, does not change salary or category allocations, and does not reset at month boundaries. Backdated top-ups contribute to overall credit; only transfers dated this month appear in this month’s top-up total.
 
 Saving uses a server-validated, owner-restricted RPC and a stable request ID, so retrying an identical save does not count a transfer twice. After saving, the dashboard credit and top-up total refresh. Unsaved top-up inputs are preserved by pull-to-refresh and block application updates until saved or the page is left. Verification covers credit changes, unchanged category/salary figures, duplicate retry handling, invalid inputs and cross-user isolation.
+
+
+## Transaction history, editing/deletion and refunds
+
+Run `supabase/migrations/005_transaction_history_and_refunds.sql` in Supabase SQL Editor after migrations 001–004, then deploy the frontend. Existing projects should apply only migration 005. It adds update timestamps, a unified history view, and owner-restricted transaction RPCs. It preserves all existing records and can be re-run.
+
+Open **History** from the navigation or **View all** in the overview. Expenses, top-ups and refunds appear newest first with pagination (30 records per page). Filter by month or all months, type, account and category. Since top-ups move money between the two accounts, they appear under either account filter; category filters exclude these category-independent transfers. Expense rows show the refunded total and the remaining refundable amount. Refund rows identify the original purchase by date and amount.
+
+- **Edit:** change amount/date and, where applicable, payment source, refund destination or expense category. Historical expenses can be corrected in months where the chosen category has a budget. Overspending remains allowed. The dashboard, history and derived balances refresh after a successful change.
+- **Delete:** requires a confirmation dialog. Deleting an expense with refunds also requires explicitly checking the box to delete all its linked refunds. That deletion is atomic. Top-ups and individual refunds can be deleted separately.
+- **Refund:** choose a partial amount or **Refund remaining** (the full purchase amount when there are no previous refunds), the received date, and the actual receiving account. Refunds cannot exceed the original purchase when combined, or predate it. They restore the original category's budget in the refund's month, and increase Flying Blue credit only when received in Flying Blue.
+- An expense with refunds retains its account/category until its refunds are removed. Its amount cannot be reduced below the amount already refunded, or its purchase date moved after a refund.
+- Edits/deletions compare the record's update timestamp with the version opened in the dialog, rejecting stale corrections rather than overwriting another change. Refund changes also update the parent expense's version. Refund creation uses a stable request ID so retrying an identical submission does not duplicate a refund.
+
+Verification: production build and 43 tests passed. Database integration tests cover historical corrections and carryover, top-up and refund editing/deletion, full/partial refunds, idempotent requests, stale-record detection, explicit linked-refund deletion, and RLS isolation. These use embedded Postgres with a minimal Supabase Auth mock. Apply the migration and verify the dialogs against your deployed Supabase project and installed iPhone app before relying on the production workflow.
