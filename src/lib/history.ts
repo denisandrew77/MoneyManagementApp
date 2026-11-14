@@ -29,7 +29,7 @@ export async function loadHistory(filters: HistoryFilters, page: number) {
   return { count: count ?? 0, rows: (data ?? []).map(row => ({ ...row, amount:Number(row.amount), expense_amount:row.expense_amount === null ? null : Number(row.expense_amount), refunded_amount:Number(row.refunded_amount), remaining_refundable:Number(row.remaining_refundable), refund_count:Number(row.refund_count) })) as Transaction[] };
 }
 export async function loadHistoryCategories() {
-  const { data, error } = await supabase!.from('categories').select('id,name,is_archived').order('sort_order').order('name');
+  const { data, error } = await supabase!.from('categories').select('id,name,icon,is_archived').order('sort_order').order('name');
   if (error) fail(error);
   return data ?? [];
 }

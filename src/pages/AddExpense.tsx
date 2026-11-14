@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, Plane, WalletCards } from 'lucide-react';
+import { CategoryIcon } from '../components/CategoryIcon';
 import { AppShell } from '../components/AppShell';
 import { useAppUpdates } from '../components/AppUpdates';
 import { useAuth } from '../components/AuthProvider';
@@ -77,7 +78,7 @@ function ExpenseForm({ data }: { data: DashboardData }) {
         </section>
         <aside className="plan-summary expense-summary" aria-live="polite">
           <div className="expense-balance-preview">
-            <div><span className="eyebrow">AFTER THIS PURCHASE</span><p>{category ? `${category.name} remaining` : 'Choose a category'}</p></div>
+            <div><span className="eyebrow category-caption">{category && <CategoryIcon name={category.icon} size={16}/>}AFTER THIS PURCHASE</span><p>{category ? `${category.name} remaining` : 'Choose a category'}</p></div>
             <strong className={category && preview.after < 0 ? 'negative-text' : ''}>{category ? money(preview.after) : '—'}</strong>
           </div>
           {paymentSource === 'flying_blue' && <div className="expense-credit-preview"><span>Flying Blue remaining</span><strong className={data.credit - preview.amount < 0 ? 'negative-text' : ''}>{money(data.credit - preview.amount)}</strong></div>}

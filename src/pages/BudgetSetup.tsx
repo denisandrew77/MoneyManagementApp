@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, Plus, Trash2, WalletCards } from 'lucide-react';
 import { useAppUpdates } from '../components/AppUpdates';
+import { CategoryIcon } from '../components/CategoryIcon';
+import { CategoryIconPicker } from '../components/CategoryIconPicker';
 import { AppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
 import { analyzePlan, decimalUnits, previewAllocation, type AllocationRow, type AllocationType } from '../lib/budget';
@@ -52,7 +54,11 @@ function BudgetForm({ initial }: { initial: BudgetSetupData }) {
       await saveBudgetSetup(salary, rows, hasSettings ? undefined : openingCredit);
       // Mark the write as saved before refreshing; a network error on refresh must not imply it was rolled back.
       setHasSettings(true); setSaved(true);
-      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['history-categories'] }),
+        queryClient.invalidateQueries({ queryKey: ['history'] }),
+      ]);
       try {
         const data = await loadBudgetSetup();
         queryClient.setQueryData(['salary-setup', session!.user.id], data);
@@ -70,13 +76,17 @@ function BudgetForm({ initial }: { initial: BudgetSetupData }) {
       <section className="white-panel allocations-panel"><div className="section-heading"><h2>02 · Split your salary</h2><span>{rows.length} categories</span></div><p className="field-help">Enter a percentage or a fixed amount for each category. The other value is calculated for you.</p>
         <div className="allocation-list">{rows.map((row, index) => {
           const preview = previewAllocation(salary, row);
-          return <div className="allocation-row" key={row.key}><div className="allocation-name"><label className="field-label" htmlFor={`name-${row.key}`}>Category {index + 1}</label><input className="text-input" id={`name-${row.key}`} value={row.name} maxLength={80} placeholder="e.g. Gas" required onChange={e => updateRow(row.key, { name: e.target.value })}/></div>
-            <div className="allocation-value"><label className="field-label" htmlFor={`value-${row.key}`}>Allocation</label><div className="allocation-controls"><select aria-label={`Allocation type for ${row.name || `category ${index + 1}`}`} value={row.type} onChange={e => switchType(row, e.target.value as AllocationType)}><option value="percentage">%</option><option value="fixed">lei</option></select><input id={`value-${row.key}`} inputMode="decimal" value={row.value} required onChange={e => updateRow(row.key, { value: e.target.value })} aria-label={`${row.type === 'fixed' ? 'Amount in lei' : 'Percentage'} for ${row.name || `category ${index + 1}`}`}/></div><span className="allocation-preview">{row.type === 'percentage' ? money(preview.amount) : `${new Intl.NumberFormat('ro-RO', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(preview.percentage)}% of salary`}</span></div>
+          return <div className="allocation-row" key={row.key}><div className="allocation-name"><label className="field-label" htmlFor={`name-${row.key}`}>Category {index + 1}</label><div className="category-name-control"><CategoryIconPicker category={row.name} value={row.icon ?? 'wallet'} onChange={icon => updateRow(row.key, { icon })}/><input className="text-input" id={`name-${row.key}`} value={row.name} maxLength={80} placeholder="e.g. Gas" required onChange={e => updateRow(row.key, { name: e.target.value })}/></div></div>
+            <div className="allocation-value">
+              <div className="allocation-amount-field"><label className="field-label" htmlFor={`value-${row.key}`}>{row.type === 'percentage' ? 'Percentage' : 'Amount (lei)'}</label><input className="text-input" id={`value-${row.key}`} inputMode="decimal" value={row.value} required onChange={e => updateRow(row.key, { value: e.target.value })} aria-label={`${row.type === 'fixed' ? 'Amount in lei' : 'Percentage'} for ${row.name || `category ${index + 1}`}`}/></div>
+              <div className="allocation-type-field"><label className="field-label" htmlFor={`type-${row.key}`}>Allocation type</label><select className="text-input" id={`type-${row.key}`} aria-label={`Allocation type for ${row.name || `category ${index + 1}`}`} value={row.type} onChange={e => switchType(row, e.target.value as AllocationType)}><option value="percentage">Percent</option><option value="fixed">Fixed lei</option></select></div>
+              <span className="allocation-preview">{row.type === 'percentage' ? money(preview.amount) : `${new Intl.NumberFormat('ro-RO', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(preview.percentage)}% of salary`}</span>
+            </div>
             <button className="remove-category" type="button" disabled={rows.length === 1} aria-label={`Remove ${row.name || `category ${index + 1}`}`} onClick={() => { changed(); setRows(current => current.filter(r => r.key !== row.key)); }}><Trash2 size={17}/></button>
           </div>;
-        })}</div><button className="add-category" type="button" onClick={() => { changed(); setRows(current => [...current, { key: crypto.randomUUID(), name: '', type: 'percentage', value: '' }]); }}><Plus size={17}/> Add category</button>
+        })}</div><button className="add-category" type="button" onClick={() => { changed(); setRows(current => [...current, { key: crypto.randomUUID(), name: '', icon: 'wallet', type: 'percentage', value: '' }]); }}><Plus size={17}/> Add category</button>
       </section></div>
-      <aside className="plan-summary"><span className="eyebrow">YOUR MONTHLY PLAN</span><h2>{money(analysis.salary)}</h2><p>expected each month</p><div className="plan-breakdown">{rows.map(row => <div key={row.key}><span>{row.name.trim() || 'New category'}</span><strong>{money(previewAllocation(salary, row).amount)}</strong></div>)}</div><div className="plan-total"><span>Allocated</span><strong>{money(analysis.allocated)}</strong></div><div className={`allocation-status ${analysis.valid ? 'complete' : ''}`} aria-live="polite">{analysis.valid ? <><Check size={17}/> All of your salary has a place.</> : !analysis.salaryValid ? 'Enter your monthly salary to get started.' : !analysis.namesValid ? 'Give each category a unique name.' : !analysis.valuesValid ? 'Enter a positive allocation for every category.' : `${differenceLabel} ${analysis.difference < 0 ? 'over your salary' : 'left to allocate'}.`}</div><p className="plan-note">Saving updates this month and future months. Previous months keep their salary and budget amounts.</p></aside>
+      <aside className="plan-summary"><span className="eyebrow">YOUR MONTHLY PLAN</span><h2>{money(analysis.salary)}</h2><p>expected each month</p><div className="plan-breakdown">{rows.map(row => <div key={row.key}><span className="category-caption"><CategoryIcon name={row.icon} size={15}/>{row.name.trim() || 'New category'}</span><strong>{money(previewAllocation(salary, row).amount)}</strong></div>)}</div><div className="plan-total"><span>Allocated</span><strong>{money(analysis.allocated)}</strong></div><div className={`allocation-status ${analysis.valid ? 'complete' : ''}`} aria-live="polite">{analysis.valid ? <><Check size={17}/> All of your salary has a place.</> : !analysis.salaryValid ? 'Enter your monthly salary to get started.' : !analysis.namesValid ? 'Give each category a unique name.' : !analysis.valuesValid ? 'Enter a positive allocation for every category.' : `${differenceLabel} ${analysis.difference < 0 ? 'over your salary' : 'left to allocate'}.`}</div><p className="plan-note">Saving updates this month and future months. Previous months keep their salary and budget amounts.</p></aside>
     </div>
     {!openingValid && <div className="notice error" role="alert">Enter a valid starting credit, with up to two decimal places.</div>}
     {error && <div className="notice error" role="alert">{error}</div>}

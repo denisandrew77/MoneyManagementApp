@@ -49,11 +49,36 @@ beforeAll(async()=>{
     insert into public.expenses(id,user_id,category_id,amount,date,payment_source) values
       ('${purchase}','${user}','${category}',900,${previous},'flying_blue'),('${currentPurchase}','${user}','${category}',50,${today},'personal');
     insert into public.top_ups(id,user_id,amount,date) values('${topUp}','${user}',1000,${today});`);
+  await db.exec(readFileSync('supabase/migrations/006_category_icons.sql','utf8'));
 },30000);
 beforeEach(async()=>{await db.exec('begin');await signIn();});
 afterEach(async()=>{await db.exec('rollback');await db.exec('reset role');});
 afterAll(()=>db.close());
 describe('History, correction and refund workflows',()=>{
+  it('backfills category icons and persists icon changes without changing balances',async()=>{
+    expect((await db.query<{icon:string}>(`select icon from public.categories where id='${category}'`)).rows[0].icon).toBe('receipt');
+    expect((await db.query<{icon:string}>(`select icon from public.categories where id='${gas}'`)).rows[0].icon).toBe('fuel');
+    const allocations=[
+      {category_id:category,name:'Expenses',icon:'groceries',allocation_type:'fixed',allocation_value:600},
+      {category_id:gas,name:'Gas',icon:'car',allocation_type:'fixed',allocation_value:400},
+    ];
+    await db.query('select public.save_salary_setup($1,$2::jsonb)',[1000,JSON.stringify(allocations)]);
+    expect((await db.query<{icon:string}>(`select icon from public.categories where id='${category}'`)).rows[0].icon).toBe('groceries');
+    expect(await balance()).toBe(250);expect(await credit()).toBe(100);
+    const withoutIcons=allocations.map(({icon,...row})=>row);
+    await db.query('select public.save_salary_setup($1,$2::jsonb)',[1000,JSON.stringify(withoutIcons)]);
+    expect((await db.query<{icon:string}>(`select icon from public.categories where id='${category}'`)).rows[0].icon).toBe('groceries');
+  });
+  it('rejects unsupported icons and rolls category changes back atomically',async()=>{
+    const allocations=[
+      {category_id:category,name:'Renamed',icon:'home',allocation_type:'fixed',allocation_value:600},
+      {category_id:gas,name:'Gas',icon:'invalid-icon',allocation_type:'fixed',allocation_value:400},
+    ];
+    await expect(guard(()=>db.query('select public.save_salary_setup($1,$2::jsonb)',[1000,JSON.stringify(allocations)]))).rejects.toThrow(/supported category icon/);
+    const saved=(await db.query<{name:string;icon:string}>(`select name,icon from public.categories where id='${category}'`)).rows[0];
+    expect(saved).toEqual({name:'Expenses',icon:'receipt'});
+    await expect(guard(()=>db.exec(`update public.categories set icon='unknown' where id='${category}'`))).rejects.toThrow(/categories_icon_check/);
+  });
   it('returns unified records and live refundable totals across months',async()=>{
     await refundPartial(200);
     expect(await scalar('select count(*) as value from public.transaction_history')).toBe(4);

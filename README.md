@@ -6,7 +6,7 @@ Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
 
-Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, `004_flying_blue_top_ups.sql`, and `005_transaction_history_and_refunds.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
+Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, `004_flying_blue_top_ups.sql`, `005_transaction_history_and_refunds.sql`, and `006_category_icons.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -162,3 +162,12 @@ Open **History** from the navigation or **View all** in the overview. Expenses, 
 - Edits/deletions compare the record's update timestamp with the version opened in the dialog, rejecting stale corrections rather than overwriting another change. Refund changes also update the parent expense's version. Refund creation uses a stable request ID so retrying an identical submission does not duplicate a refund.
 
 Verification: production build and 43 tests passed. Database integration tests cover historical corrections and carryover, top-up and refund editing/deletion, full/partial refunds, idempotent requests, stale-record detection, explicit linked-refund deletion, and RLS isolation. These use embedded Postgres with a minimal Supabase Auth mock. Apply the migration and verify the dialogs against your deployed Supabase project and installed iPhone app before relying on the production workflow.
+
+
+## Category icons
+
+Run `supabase/migrations/006_category_icons.sql` after migrations 001–005, then deploy the frontend. This adds a validated icon identifier to each category and extends the existing atomic salary-setup save function. Existing Expenses/Cheltuieli, Gas/Fuel and Savings categories receive receipt, fuel and savings symbols; other categories default to a wallet. Re-running the migration preserves chosen icons.
+
+In **Salary & budgets**, click the symbol next to a category name, choose from the 20 icons, and click **Save salary & budgets**. The picker works for new and existing categories. Saved icons appear on the featured dashboard category, category budget rows, recent expenses, expense balance previews, and expense rows in History. Icons are stored in Supabase and apply across devices. They do not change allocations or transaction amounts. Legacy callers that omit the icon retain the previously saved choice.
+
+Verification includes icon persistence/defaults, unchanged category balances and credit, compatibility with older save requests, and rollback when an unsupported icon is submitted. The current production build and 45 tests pass; deployed Supabase and iPhone UI verification still require applying the migration and deploying this release.

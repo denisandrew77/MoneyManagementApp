@@ -1,5 +1,5 @@
 export type AllocationType = 'percentage' | 'fixed';
-export interface AllocationRow { key: string; categoryId?: string; name: string; type: AllocationType; value: string }
+export interface AllocationRow { key: string; categoryId?: string; name: string; icon?: string; type: AllocationType; value: string }
 const SCALE = 1_000_000n;
 export function decimalUnits(raw: string, decimals: number): bigint | null {
   const text = raw.trim().replace(',', '.');

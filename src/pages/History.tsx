@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDownLeft, ArrowUpRight, Check, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { Plane, ArrowUpRight, Check, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
+import { CategoryIcon } from '../components/CategoryIcon';
 import { AppShell } from '../components/AppShell';
 import { useAppUpdates } from '../components/AppUpdates';
 import { useAuth } from '../components/AuthProvider';
@@ -41,7 +42,7 @@ export function History() {
       <div className="section-heading"><h2>{history.data.count} transaction{history.data.count===1?'':'s'}</h2><span>Newest first</span></div>
       {history.isError && <div className="notice error" role="alert">Could not refresh. Showing previously loaded records.</div>}
       {!history.data.rows.length ? <div className="empty-state"><RotateCcw size={28}/><h3>No transactions here yet.</h3><p>Try another month or change the filters.</p></div> : <ul className="transaction-list">{history.data.rows.map(row=><li key={`${row.kind}:${row.id}`} className="transaction-item">
-        <div className={`transaction-icon ${row.kind}`}>{row.kind==='expense'?<ArrowUpRight size={21}/>:row.kind==='refund'?<RotateCcw size={20}/>:<ArrowDownLeft size={21}/>}</div>
+        <div className={`transaction-icon ${row.kind}`}>{row.kind==='expense'?<CategoryIcon name={categories.data?.find(c=>c.id===row.category_id)?.icon} size={21}/>:row.kind==='refund'?<RotateCcw size={20}/>:<Plane size={21}/>}</div>
         <div className="transaction-details"><div className="transaction-topline"><strong>{row.kind==='top_up'?'Flying Blue top-up':row.category_name || kindLabel(row.kind)}</strong><strong className={row.kind==='expense'?'':'positive-text'}>{row.kind==='expense'?'−':'+'}{money(row.amount)}</strong></div>
           <p>{kindLabel(row.kind)} · {row.kind==='top_up'?'Personal → Flying Blue':accountLabel(row.account)} · {new Intl.DateTimeFormat('en-GB',{day:'numeric',month:'short',year:'numeric'}).format(new Date(`${row.date}T12:00:00`))}</p>
           {row.kind==='expense' && row.refund_count>0 && <span className="refund-badge">{row.remaining_refundable===0?'Fully refunded':`${money(row.refunded_amount)} refunded · ${money(row.remaining_refundable)} refundable`}</span>}
