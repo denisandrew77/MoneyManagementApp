@@ -1,12 +1,12 @@
 # Pocket
 
-Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, a salary/category allocation editor, and expense entry are implemented. Expense editing, top-up entry, and refund entry forms are future work. No sample financial data is displayed.
+Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS, React Router, TanStack Query, Tailwind CSS. Google login, a dashboard, a salary/category allocation editor, expense entry, and Flying Blue top-ups are implemented. Expense editing and refund entry forms are future work. No sample financial data is displayed.
 
 ## 1. Create the database
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
 
-Next run migrations `002_salary_setup.sql` and `003_expenses_and_budget_carryover.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
+Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, and `004_flying_blue_top_ups.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -105,7 +105,7 @@ Settings and budget snapshot tables allow direct reads only. Use this RPC to cha
 
 On a touch device, scroll to the top of Overview or Salary & budgets, pull down, and release when “Release to refresh” appears. This fetches fresh active Supabase queries and checks for an app update without reloading the page. The Refresh button provides the same action on desktop and as an accessible alternative. Unsaved salary edits are preserved, including if a background refresh fails. A clean salary form adopts the refreshed saved values.
 
-Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary or expense form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
+Production service-worker registration checks for updates on launch, when the app returns to the foreground, when connectivity returns, and once per minute while visible and online. A ready update displays an **Update app** banner. Applying it activates the downloaded version and reloads the app. Updating is blocked while the salary, expense, or top-up form contains unsaved edits or is saving. Detection does not force a reload during editing, including when another tab activates the update. Vercel serves `sw.js` without caching to support these checks.
 
 No SQL changes are needed. Commit and deploy the source changes to enable this on the hosted app. Existing installations need to load this release first; detection then works for subsequent deployments. Service workers run in production builds on HTTPS or localhost, not the Vite development server. To manually verify an update, open a production build, deploy a second build with a visible change, foreground the first app, wait for the banner, then apply it. Verify touch behavior and the update flow on the installed iPhone PWA; those device checks have not been performed in this workspace.
 
@@ -130,3 +130,20 @@ For example: Gas allowance 500 lei, ending at −200 lei, starts the next month 
 The dashboard’s monthly total is now salary plus category carry-ins, minus current-month expenses, plus current-month refunds. Flying Blue credit remains an independent running balance and is not reduced again when category debt carries forward.
 
 Verification: production build and 30 tests passed, including multi-month carryover, unopened months, surplus reset, removed-category debt, full/partial refund rules, retry idempotency, and cross-user isolation. The migration was tested against embedded Postgres; apply it to your hosted Supabase project before using expense entry. Live production and iPhone form testing still require the deployed release.
+
+
+## Flying Blue top-ups
+
+Run `supabase/migrations/004_flying_blue_top_ups.sql` after the earlier migrations, then deploy the frontend. Existing projects should run only this new migration. Open **Top up** from the navigation or visit `/top-ups/new`.
+
+Enter the amount transferred from Personal to Flying Blue and the transfer date (today or earlier). The preview shows your available credit after adding the transfer. These entries record transfers already made; they do not perform bank transfers. Complete the salary/starting-credit setup first so the running credit can be calculated.
+
+Flying Blue credit is independent of budget categories:
+
+```text
+Available credit = starting credit + top-ups − all Flying Blue expenses + refunds returned to Flying Blue
+```
+
+A 600 lei top-up followed by a 500 lei Flying Blue expense leaves 100 lei available. Only the expense uses the selected category’s budget. A top-up has no category, does not change salary or category allocations, and does not reset at month boundaries. Backdated top-ups contribute to overall credit; only transfers dated this month appear in this month’s top-up total.
+
+Saving uses a server-validated, owner-restricted RPC and a stable request ID, so retrying an identical save does not count a transfer twice. After saving, the dashboard credit and top-up total refresh. Unsaved top-up inputs are preserved by pull-to-refresh and block application updates until saved or the page is left. Verification covers credit changes, unchanged category/salary figures, duplicate retry handling, invalid inputs and cross-user isolation.

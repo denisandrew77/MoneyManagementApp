@@ -23,7 +23,7 @@ beforeAll(async () => {
     create function auth.uid() returns uuid language sql stable as $$ select (auth.jwt()->>'sub')::uuid $$;
     grant usage on schema public,auth to authenticated,anon; grant execute on all functions in schema auth to authenticated,anon;
     insert into auth.users values('${owner}'),('${outsider}');`);
-  for (const migration of ['001_initial_schema.sql','002_salary_setup.sql','003_expenses_and_budget_carryover.sql']) {
+  for (const migration of ['001_initial_schema.sql','002_salary_setup.sql','003_expenses_and_budget_carryover.sql','004_flying_blue_top_ups.sql']) {
     await db.exec(readFileSync(`supabase/migrations/${migration}`,'utf8'));
   }
   await db.exec(`insert into private.allowed_emails values('owner@example.com'),('other@example.com');
@@ -99,6 +99,22 @@ describe('Expense creation and negative category carryover', () => {
     expect(await balance(gas,-1)).toBe(-400);
     expect(await balance(retired)).toBe(-50);
   });
+  it('adds Flying Blue credit without changing category budgets and safely retries top-ups',async () => {
+    const beforeGas = await balance(gas);
+    const beforeOther = await balance(other);
+    const beforeCredit = await value('select available_credit as value from public.flying_blue_summary');
+    const id='ffffffff-ffff-4fff-8fff-ffffffffffff';
+    await db.exec(`select public.save_top_up('${id}',600,${today}); select public.save_top_up('${id}',600,${today})`);
+    expect(await value('select available_credit as value from public.flying_blue_summary')).toBe(beforeCredit+600);
+    expect(await value(`select count(*) as value from public.top_ups where id='${id}'`)).toBe(1);
+    expect(await balance(gas)).toBe(beforeGas);
+    expect(await balance(other)).toBe(beforeOther);
+    expect(await value('select salary as value from public.user_settings')).toBe(1000);
+    await expect(db.exec(`select public.save_top_up('${id}',601,${today})`)).rejects.toThrow(/different details/);
+    await expect(db.exec(`select public.save_top_up(gen_random_uuid(),0,${today})`)).rejects.toThrow(/positive amount/);
+    await expect(db.exec(`select public.save_top_up(gen_random_uuid(),1.001,${today})`)).rejects.toThrow(/two decimals/);
+    await expect(db.exec(`select public.save_top_up(gen_random_uuid(),1,${today}+1)`)).rejects.toThrow(/earlier date/);
+  });
   it('validates amount and date without treating a low budget as an error',async () => {
     await expect(db.exec(`select public.save_expense(gen_random_uuid(),1.001,'${gas}','personal',${today},null)`)).rejects.toThrow(/two decimals/);
     await expect(db.exec(`select public.save_expense(gen_random_uuid(),1,'${gas}','personal',(${month}-interval '1 day')::date,null)`)).rejects.toThrow(/current month/);
@@ -108,8 +124,11 @@ describe('Expense creation and negative category carryover', () => {
     await signIn(outsider,'other@example.com');
     expect(await value('select count(*) as value from public.category_budget_summary')).toBe(0);
     await expect(db.exec(`select public.save_expense(gen_random_uuid(),1,'${gas}','personal',${today},null)`)).rejects.toThrow(/budget for this category/);
+    expect(await value('select count(*) as value from public.top_ups')).toBe(0);
+    await expect(db.exec(`select public.save_top_up(gen_random_uuid(),600,${today})`)).rejects.toThrow(/Set up/);
     await signIn(owner,'unapproved@example.com');
     expect(await value('select count(*) as value from public.category_budget_summary')).toBe(0);
     await expect(db.exec(`select public.save_expense(gen_random_uuid(),1,'${gas}','personal',${today},null)`)).rejects.toThrow(/Access denied/);
+    await expect(db.exec(`select public.save_top_up(gen_random_uuid(),600,${today})`)).rejects.toThrow(/Access denied/);
   });
 });
