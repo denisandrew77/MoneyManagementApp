@@ -20,3 +20,14 @@ export async function saveExpense(input: ExpenseInput): Promise<{ remaining: num
   }
   return { remaining: Number(data.remaining), overBudget: Boolean(data.over_budget) };
 }
+
+export interface ExpenseFieldErrors { amount?: string; categoryId?: string; date?: string }
+export function expenseFieldErrors(amount: string, categoryId: string, date: string, categoryIds: string[], today: string): ExpenseFieldErrors {
+  const errors: ExpenseFieldErrors = {};
+  if (!expensePreview(amount, 0).valid) errors.amount = 'Enter a positive amount in lei, using at most two decimal places (for example, 25,50).';
+  if (!categoryIds.includes(categoryId)) errors.categoryId = 'Choose a category for this expense.';
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : null;
+  const calendarDate = parsed && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+  if (!calendarDate || date < `${today.slice(0, 7)}-01` || date > today) errors.date = 'Choose a date in the current month, up to today.';
+  return errors;
+}

@@ -8,7 +8,7 @@ import { useAppUpdates } from '../components/AppUpdates';
 import { useAuth } from '../components/AuthProvider';
 import { loadDashboard, type DashboardData } from '../lib/dashboard';
 import { currentMonth, money, todayInBucharest } from '../lib/format';
-import { expensePreview, saveExpense, type PaymentSource } from '../lib/expenses';
+import { expenseFieldErrors, expensePreview, saveExpense, type ExpenseFieldErrors, type PaymentSource } from '../lib/expenses';
 export function AddExpense() {
   const { session } = useAuth();
   const query = useQuery({ queryKey: ['dashboard', session?.user.id, currentMonth()], queryFn: loadDashboard });
@@ -30,44 +30,52 @@ function ExpenseForm({ data }: { data: DashboardData }) {
   const requestId = useRef<string | null>(null);
   const [result, setResult] = useState<{ remaining: number; category: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<ExpenseFieldErrors>({});
   const category = data.categories.find(c => c.id === categoryId);
   const preview = expensePreview(amount, category?.remaining ?? 0);
-  const valid = preview.valid && !!category && date >= currentMonth() && date <= todayInBucharest();
   useEffect(() => { setUpdateBlocked(dirty || busy); return () => setUpdateBlocked(false); }, [dirty, busy, setUpdateBlocked]);
-  function changed() { setDirty(true); setError(null); }
+  function changed() { setDirty(true); setError(null); setFieldErrors({}); }
   function newExpense() {
-    requestId.current = null; setResult(null); setAmount(''); setDescription(''); setDate(todayInBucharest()); setDirty(false); setError(null);
+    requestId.current = null; setResult(null); setAmount(''); setDescription(''); setDate(todayInBucharest()); setDirty(false); setError(null); setFieldErrors({});
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (!valid || saving.current || result) return;
+    event.preventDefault(); if (saving.current || result) return;
+    const issues = expenseFieldErrors(amount, categoryId, date, data.categories.map(c => c.id), todayInBucharest());
+    setFieldErrors(issues);
+    if (Object.keys(issues).length) {
+      const id = issues.amount ? 'expense-amount' : issues.categoryId ? 'expense-category' : 'expense-date';
+      document.getElementById(id)?.focus();
+      return;
+    }
     saving.current = true; setBusy(true); setError(null);
-    requestId.current ??= crypto.randomUUID();
     try {
+      if (!globalThis.crypto?.randomUUID) throw new Error('Open the app over HTTPS or localhost to save securely.');
+      requestId.current ??= crypto.randomUUID();
       const saved = await saveExpense({ id: requestId.current, amount, categoryId, paymentSource, date, description });
       setResult({ remaining: saved.remaining, category: category!.name }); setDirty(false);
       // Show confirmed success before fetching fresh totals; a refresh failure is not a failed save.
-      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      await Promise.all([queryClient.invalidateQueries({ queryKey: ['dashboard'] }), queryClient.invalidateQueries({ queryKey: ['history'] })]);
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not save this expense. Please try again.'); }
     finally { saving.current = false; setBusy(false); }
   }
   if (result) return <section className="white-panel expense-confirmation"><span className="confirmation-icon"><Check size={30}/></span><h2>Expense saved.</h2><p>{money(preview.amount)} paid from {paymentSource === 'personal' ? 'Personal' : 'Flying Blue'}, assigned to {result.category}.</p><div className={result.remaining < 0 ? 'expense-warning' : 'save-success'}><strong>{money(result.remaining)} remaining in {result.category}.</strong>{result.remaining < 0 && <p>This shortfall will reduce next month’s allowance for this category.</p>}</div><div className="expense-actions"><button type="button" className="primary-button" onClick={newExpense}>Add another expense</button><Link to="/" className="setup-link">View overview →</Link></div></section>;
-  return <form onSubmit={submit} aria-busy={busy} className="expense-form">
+  return <form onSubmit={submit} aria-busy={busy} className="expense-form" noValidate>
     <fieldset className="budget-fieldset" disabled={busy}>
       <div className="budget-editor">
         <section className="white-panel expense-fields" aria-label="Expense details">
           <div className="expense-input-row">
             <div className="expense-field">
               <label className="field-label" htmlFor="expense-amount">Amount (lei)</label>
-              <div className="input-suffix salary-input"><input id="expense-amount" inputMode="decimal" placeholder="0.00" value={amount} onChange={e => { changed(); setAmount(e.target.value); }} required/><span>lei</span></div>
+              <div className="input-suffix salary-input"><input id="expense-amount" aria-invalid={!!fieldErrors.amount} aria-describedby={fieldErrors.amount ? 'expense-amount-error' : undefined} inputMode="decimal" placeholder="0.00" value={amount} onChange={e => { changed(); setAmount(e.target.value); }} required/><span>lei</span></div>{fieldErrors.amount && <p className="field-error" id="expense-amount-error" role="alert">{fieldErrors.amount}</p>}
             </div>
             <div className="expense-field">
               <label className="field-label" htmlFor="expense-date">Date</label>
-              <input className="text-input" id="expense-date" type="date" min={currentMonth()} max={todayInBucharest()} value={date} onChange={e => { changed(); setDate(e.target.value); }} required/>
+              <input className="text-input" id="expense-date" aria-invalid={!!fieldErrors.date} aria-describedby={fieldErrors.date ? 'expense-date-error' : undefined} type="date" min={currentMonth()} max={todayInBucharest()} value={date} onChange={e => { changed(); setDate(e.target.value); }} required/>{fieldErrors.date && <p className="field-error" id="expense-date-error" role="alert">{fieldErrors.date}</p>}
             </div>
           </div>
           <div className="expense-field">
             <label className="field-label" htmlFor="expense-category">Category</label>
-            <select className="text-input" id="expense-category" value={categoryId} onChange={e => { changed(); setCategoryId(e.target.value); }} required><option value="" disabled>Choose a category</option>{data.categories.map(c => <option key={c.id} value={c.id}>{c.name} · {money(c.remaining)} left</option>)}</select>
+            <select className="text-input" id="expense-category" aria-invalid={!!fieldErrors.categoryId} aria-describedby={fieldErrors.categoryId ? 'expense-category-error' : undefined} value={categoryId} onChange={e => { changed(); setCategoryId(e.target.value); }} required><option value="" disabled>Choose a category</option>{data.categories.map(c => <option key={c.id} value={c.id}>{c.name} · {money(c.remaining)} left</option>)}</select>{fieldErrors.categoryId && <p className="field-error" id="expense-category-error" role="alert">{fieldErrors.categoryId}</p>}
           </div>
           <div className="expense-field">
             <span className="field-label" id="payment-label">Paid from</span>
@@ -91,7 +99,7 @@ function ExpenseForm({ data }: { data: DashboardData }) {
         </aside>
       </div>
       {error && <div role="alert" className="notice error">{error}</div>}
-      <div className="budget-save-bar"><button className="primary-button" disabled={!valid || busy} type="submit">{busy ? 'Saving expense…' : preview.overBudget ? 'Save expense anyway' : 'Save expense'}</button></div>
+      <div className="budget-save-bar"><button className="primary-button" disabled={busy} type="submit">{busy ? 'Saving expense…' : preview.overBudget ? 'Save expense anyway' : 'Save expense'}</button></div>
     </fieldset>
   </form>;
 }

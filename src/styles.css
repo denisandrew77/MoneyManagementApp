@@ -67,3 +67,4 @@ button,.primary-button,.secondary-button{transition:transform 120ms var(--motion
 .account-options label:active,.category-icon-picker>summary:active{background:#dce9cb;transform:scale(.97)}
 button:disabled{filter:none}
 @media(prefers-reduced-motion:reduce){button,.primary-button,.secondary-button{transition:none}button:not(:disabled):active,.primary-button:not(:disabled):active,.secondary-button:not(:disabled):active,.account-options label:active,.category-icon-picker>summary:active{transform:none}}
+.field-error{color:#a24d37;font-size:11px;line-height:1.6;margin-top:6px}.text-input[aria-invalid=true],.input-suffix:has(input[aria-invalid=true]){border-color:#bd705b;background:#fff7f3}
