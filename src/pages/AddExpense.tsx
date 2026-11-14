@@ -23,6 +23,7 @@ function ExpenseForm({ data }: { data: DashboardData }) {
   const [categoryId, setCategoryId] = useState('');
   const [paymentSource, setPaymentSource] = useState<PaymentSource>('flying_blue');
   const [date, setDate] = useState(todayInBucharest);
+  const [description, setDescription] = useState('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
@@ -35,14 +36,14 @@ function ExpenseForm({ data }: { data: DashboardData }) {
   useEffect(() => { setUpdateBlocked(dirty || busy); return () => setUpdateBlocked(false); }, [dirty, busy, setUpdateBlocked]);
   function changed() { setDirty(true); setError(null); }
   function newExpense() {
-    requestId.current = null; setResult(null); setAmount(''); setDate(todayInBucharest()); setDirty(false); setError(null);
+    requestId.current = null; setResult(null); setAmount(''); setDescription(''); setDate(todayInBucharest()); setDirty(false); setError(null);
   }
   async function submit(event: FormEvent) {
     event.preventDefault(); if (!valid || saving.current || result) return;
     saving.current = true; setBusy(true); setError(null);
     requestId.current ??= crypto.randomUUID();
     try {
-      const saved = await saveExpense({ id: requestId.current, amount, categoryId, paymentSource, date, description: '' });
+      const saved = await saveExpense({ id: requestId.current, amount, categoryId, paymentSource, date, description });
       setResult({ remaining: saved.remaining, category: category!.name }); setDirty(false);
       // Show confirmed success before fetching fresh totals; a refresh failure is not a failed save.
       await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -74,6 +75,10 @@ function ExpenseForm({ data }: { data: DashboardData }) {
               <label className={paymentSource === 'personal' ? 'selected' : ''}><input type="radio" name="payment-source" value="personal" checked={paymentSource === 'personal'} onChange={() => { changed(); setPaymentSource('personal'); }}/><WalletCards size={20}/><span>Personal</span></label>
               <label className={paymentSource === 'flying_blue' ? 'selected' : ''}><input type="radio" name="payment-source" value="flying_blue" checked={paymentSource === 'flying_blue'} onChange={() => { changed(); setPaymentSource('flying_blue'); }}/><Plane size={20}/><span>Flying Blue</span></label>
             </div>
+          </div>
+          <div className="expense-field">
+            <label className="field-label" htmlFor="expense-description">Description <span className="optional-label">optional</span></label>
+            <input className="text-input" id="expense-description" type="text" maxLength={1000} placeholder="What was it for?" value={description} onChange={event => { changed(); setDescription(event.target.value); }}/>
           </div>
         </section>
         <aside className="plan-summary expense-summary" aria-live="polite">
