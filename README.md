@@ -6,7 +6,7 @@ Mobile-first React + TypeScript + Vite PWA, Supabase Auth (Google), Postgres/RLS
 
 In **Supabase → SQL Editor → New query**, paste the complete contents of `supabase/migrations/001_initial_schema.sql` and click **Run**. Run it once on an empty project. It creates the tables, ownership policies, email allowlist, budget functions, and dashboard views in one transaction.
 
-Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, `004_flying_blue_top_ups.sql`, `005_transaction_history_and_refunds.sql`, and `006_category_icons.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
+Next run migrations `002_salary_setup.sql`, `003_expenses_and_budget_carryover.sql`, `004_flying_blue_top_ups.sql`, `005_transaction_history_and_refunds.sql`, `006_category_icons.sql`, and `007_positive_budget_carryover.sql` in order, each in the SQL Editor. Existing projects should run only migrations not yet applied. Migration 003 adds expense creation and replaces the budget summary view to carry negative category balances forward.
 
 Then run this query, replacing the example email with your actual Google account email:
 
@@ -63,8 +63,8 @@ On iPhone, open the HTTPS URL in Safari → Share → Add to Home Screen → Ope
 - Every expense affects only its selected category. Flying Blue expenses additionally reduce available Flying Blue credit.
 - Top-ups affect credit only. Credit carries forward across months and may go negative.
 - A refund is linked to one expense, inherits its category, and restores budget in the refund's month. Its actual destination determines whether Flying Blue credit increases. Partial refunds are supported; the combined amount cannot exceed the purchase amount.
-- Category spending may exceed its allowance. Only a negative month-end category balance rolls forward, reducing the next month’s allowance; unused positive allowance resets. This applies separately to each category and can continue across multiple months.
-- Budget snapshots preserve past salary and allocations. Saving a plan updates the current month and defaults for future months. `ensure_current_month()` creates the current month's snapshot on dashboard load; no scheduled job is required. Months when the app is never opened are not materialized automatically; the carryover view calculates those intervening months using the latest saved plan at that point in time. An explicit plan omitting a category assigns it zero allowance while preserving any outstanding debt.
+- Category spending may exceed its allowance. The full month-end category balance rolls forward: positive surplus increases next month’s available budget and negative balances reduce it. This applies separately to each category and accumulates across months.
+- Budget snapshots preserve past salary and allocations. Saving a plan updates the current month and defaults for future months. `ensure_current_month()` creates the current month's snapshot on dashboard load; no scheduled job is required. Months when the app is never opened are not materialized automatically; the carryover view calculates those intervening months using the latest saved plan at that point in time. An explicit plan omitting a category assigns it zero allowance while preserving the full carried balance, including a positive surplus.
 - Opening credit is your net Flying Blue credit immediately before your first tracked transactions. It must not include top-ups already entered in the app.
 - All amounts are exact RON decimals. Percent allocations recalculate with salary; fixed allocations retain their amount. A complete plan must allocate the full salary. Rounding residue goes to the largest category.
 - Linked refunds must be explicitly deleted before deleting their expense. A refunded expense's payment source/category cannot be changed until its refunds are removed.
@@ -110,7 +110,7 @@ Production service-worker registration checks for updates on launch, when the ap
 No SQL changes are needed. Commit and deploy the source changes to enable this on the hosted app. Existing installations need to load this release first; detection then works for subsequent deployments. Service workers run in production builds on HTTPS or localhost, not the Vite development server. To manually verify an update, open a production build, deploy a second build with a visible change, foreground the first app, wait for the banner, then apply it. Verify touch behavior and the update flow on the installed iPhone PWA; those device checks have not been performed in this workspace.
 
 
-## Add expense and negative budget carryover
+## Add expense and budget carryover
 
 Run `supabase/migrations/003_expenses_and_budget_carryover.sql` in Supabase SQL Editor after migrations 001 and 002, then deploy the frontend. No existing rows are deleted. The migration is safe to re-run.
 
@@ -121,15 +121,15 @@ The save RPC checks ownership and preserves RLS. A client-generated expense ID m
 For each category:
 
 ```text
-Carry-in = min(previous month’s remaining balance, 0)
+Carry-in = previous month’s remaining balance
 Remaining = monthly allowance + carry-in − expenses + refunds received this month
 ```
 
-For example: Gas allowance 500 lei, ending at −200 lei, starts the next month with 300 lei available. Spending 400 lei then leaves −100 lei. A later month’s allowance covers that debt; positive leftover money does not carry forward. An omitted category keeps its debt with zero new allowance until it is allocated money again or receives a refund. Each month’s saved salary and allowances are preserved, while derived remainders reflect historical transaction edits.
+For example: Gas allowance 500 lei, ending at −200 lei, starts the next month with 300 lei available. Spending 400 lei then leaves −100 lei. A later month’s allowance covers that debt. Positive leftover money also carries forward: ending at +200 lei with a new 500 lei allowance gives 700 lei available next month. An omitted category retains its positive or negative balance with zero new allowance. Each month’s saved salary and allowances are preserved, while derived remainders reflect historical transaction edits.
 
 The dashboard’s monthly total is now salary plus category carry-ins, minus current-month expenses, plus current-month refunds. Flying Blue credit remains an independent running balance and is not reduced again when category debt carries forward.
 
-Verification: production build and 30 tests passed, including multi-month carryover, unopened months, surplus reset, removed-category debt, full/partial refund rules, retry idempotency, and cross-user isolation. The migration was tested against embedded Postgres; apply it to your hosted Supabase project before using expense entry. Live production and iPhone form testing still require the deployed release.
+Verification: production build and 30 tests passed, including multi-month carryover, unopened months, surplus accumulation, removed-category balances, full/partial refund rules, retry idempotency, and cross-user isolation. The migration was tested against embedded Postgres; apply it to your hosted Supabase project before using expense entry. Live production and iPhone form testing still require the deployed release.
 
 
 ## Flying Blue top-ups
@@ -171,3 +171,14 @@ Run `supabase/migrations/006_category_icons.sql` after migrations 001–005, the
 In **Salary & budgets**, click the symbol next to a category name, choose from the 20 icons, and click **Save salary & budgets**. The picker works for new and existing categories. Saved icons appear on the featured dashboard category, category budget rows, recent expenses, expense balance previews, and expense rows in History. Icons are stored in Supabase and apply across devices. They do not change allocations or transaction amounts. Legacy callers that omit the icon retain the previously saved choice.
 
 Verification includes icon persistence/defaults, unchanged category balances and credit, compatibility with older save requests, and rollback when an unsupported icon is submitted. The current production build and 45 tests pass; deployed Supabase and iPhone UI verification still require applying the migration and deploying this release.
+
+
+## Positive and negative category carryover
+
+Run `supabase/migrations/007_positive_budget_carryover.sql` after migrations 001–006, then deploy the frontend. It replaces the category summary calculation, preserves RLS and all saved transactions/allowances, and is safe to re-run.
+
+Every category now carries its entire remaining balance forward. A positive 200 lei balance plus next month’s 500 lei allowance gives 700 lei available. A negative 200 lei balance gives 300 lei available. Unopened months are calculated using the latest saved plan, and removing a category from a later plan gives it zero new allowance without discarding its saved-up money or debt. Refunds and historical corrections recalculate subsequent balances. Flying Blue credit is unchanged by this rule.
+
+The rule applies from the earliest recorded category budget, so unused amounts from earlier months will be included in today's available balances after applying the migration. Monthly salary and allocation snapshots remain unchanged. The dashboard shows positive carry-ins as “carried forward” and deficits as “previous shortfall”; progress uses the allowance plus carry-in.
+
+Production build and 46 tests passed, including positive accumulation, negative carryover, omitted categories, historical corrections and unchanged allowances. Live hosted verification requires applying this migration in Supabase.

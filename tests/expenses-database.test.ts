@@ -23,7 +23,7 @@ beforeAll(async () => {
     create function auth.uid() returns uuid language sql stable as $$ select (auth.jwt()->>'sub')::uuid $$;
     grant usage on schema public,auth to authenticated,anon; grant execute on all functions in schema auth to authenticated,anon;
     insert into auth.users values('${owner}'),('${outsider}');`);
-  for (const migration of ['001_initial_schema.sql','002_salary_setup.sql','003_expenses_and_budget_carryover.sql','004_flying_blue_top_ups.sql']) {
+  for (const migration of ['001_initial_schema.sql','002_salary_setup.sql','003_expenses_and_budget_carryover.sql','004_flying_blue_top_ups.sql','007_positive_budget_carryover.sql']) {
     await db.exec(readFileSync(`supabase/migrations/${migration}`,'utf8'));
   }
   await db.exec(`insert into private.allowed_emails values('owner@example.com'),('other@example.com');
@@ -42,16 +42,17 @@ beforeAll(async () => {
   await signIn();
 },30000);
 afterAll(() => db.close());
-describe('Expense creation and negative category carryover', () => {
-  it('carries only deficits, including unopened months, and resets positive surplus',async () => {
+describe('Expense creation and full category carryover', () => {
+  it('carries deficits and positive surplus, including unopened months',async () => {
     expect(await balance(gas,-3)).toBe(-800);
     expect(await balance(gas,-2)).toBe(-300);
     expect(await balance(gas,-1)).toBe(-400);
     expect(await balance(gas)).toBe(100);
     expect(await balance(gas,0,'carry_in')).toBe(-400);
     expect(await balance(other,-3)).toBe(400);
-    expect(await balance(other,-2)).toBe(500);
-    expect(await balance(other)).toBe(500);
+    expect(await balance(other,-2)).toBe(900);
+    expect(await balance(other)).toBe(1900);
+    expect(await balance(other,0,'carry_in')).toBe(1400);
   });
   it('keeps outstanding debt even when a category is removed from later plans',async () => {
     expect(await balance(retired,-2)).toBe(-50);
@@ -66,7 +67,8 @@ describe('Expense creation and negative category carryover', () => {
     await db.exec(sql);
     expect(await value(`select count(*) as value from public.expenses where id='${id}'`)).toBe(1);
     expect(await balance(gas)).toBe(-150);
-    expect(await balance(other)).toBe(500);
+    expect(await balance(other)).toBe(1900);
+    expect(await balance(other,0,'carry_in')).toBe(1400);
     expect(await value('select available_credit as value from public.flying_blue_summary')).toBe(-250);
     await expect(db.exec(`select public.save_expense('${id}',251,'${gas}','flying_blue',${today},'Fuel')`)).rejects.toThrow(/different details/);
   });
@@ -80,7 +82,9 @@ describe('Expense creation and negative category carryover', () => {
     await signIn();
     expect(await balance(gas,1)).toBe(300);
     expect(await balance(gas,1,'carry_in')).toBe(-200);
-    expect(await value(`select sum(remaining) as value from public.category_budget_summary where month=${month}`)).toBe(250);
+    expect(await balance(other,1)).toBe(1900);
+    expect(await balance(other,1,'budget_amount')).toBe(0);
+    expect(await value(`select sum(remaining) as value from public.category_budget_summary where month=${month}`)).toBe(1650);
   });
   it('applies refunds in their received month and recalculates subsequent debt',async () => {
     await db.exec(`insert into public.refunds(expense_id,amount,date,destination) values('${firstPurchase}',100,${today},'personal')`);
@@ -96,6 +100,7 @@ describe('Expense creation and negative category carryover', () => {
     await db.exec('select public.ensure_current_month(); select public.ensure_current_month()');
     expect(await balance(gas,0,'carry_in')).toBe(-400);
     expect(await balance(gas)).toBe(100);
+    expect(await balance(gas,1)).toBe(600);
     expect(await balance(gas,-1)).toBe(-400);
     expect(await balance(retired)).toBe(-50);
   });

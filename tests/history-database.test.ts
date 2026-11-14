@@ -50,6 +50,7 @@ beforeAll(async()=>{
       ('${purchase}','${user}','${category}',900,${previous},'flying_blue'),('${currentPurchase}','${user}','${category}',50,${today},'personal');
     insert into public.top_ups(id,user_id,amount,date) values('${topUp}','${user}',1000,${today});`);
   await db.exec(readFileSync('supabase/migrations/006_category_icons.sql','utf8'));
+  await db.exec(readFileSync('supabase/migrations/007_positive_budget_carryover.sql','utf8'));
 },30000);
 beforeEach(async()=>{await db.exec('begin');await signIn();});
 afterEach(async()=>{await db.exec('rollback');await db.exec('reset role');});
@@ -104,9 +105,18 @@ describe('History, correction and refund workflows',()=>{
     await edit('expense',purchase,1000,previous,'flying_blue');
     expect(await balance()).toBe(150);expect(await credit()).toBe(0);
     await edit('expense',purchase,1000,previous,'personal',gas);
-    expect(await balance()).toBe(550);expect(await balance(gas)).toBe(-200);expect(await credit()).toBe(1000);
+    expect(await balance()).toBe(1150);expect(await balance(gas)).toBe(-200);expect(await credit()).toBe(1000);
     await remove('expense',purchase);
-    expect(await balance(gas)).toBe(400);expect(await balance()).toBe(550);
+    expect(await balance(gas)).toBe(800);expect(await balance()).toBe(1150);
+  });
+  it('recalculates positive carryover after historical corrections without altering monthly allowances',async()=>{
+    await edit('expense',purchase,400,previous,'flying_blue');
+    expect(await scalar(`select carry_in as value from public.category_budget_summary where month=${month} and category_id='${category}'`)).toBe(200);
+    expect(await balance()).toBe(750);
+    expect(await scalar(`select budget_amount as value from public.category_budget_summary where month=${month} and category_id='${category}'`)).toBe(600);
+    await refundPartial(100,'personal');
+    expect(await balance()).toBe(850);
+    expect(await credit()).toBe(600);
   });
   it('edits and deletes top-ups without touching category budgets',async()=>{
     await edit('top_up',topUp,1200,today,'flying_blue');
@@ -125,7 +135,7 @@ describe('History, correction and refund workflows',()=>{
     expect(await scalar('select count(*) as value from public.refunds')).toBe(1);
     await remove('expense',purchase,true);
     expect(await scalar('select count(*) as value from public.refunds')).toBe(0);
-    expect(await balance()).toBe(550);expect(await credit()).toBe(1000);
+    expect(await balance()).toBe(1150);expect(await credit()).toBe(1000);
     await db.exec(`select public.delete_transaction('expense','${purchase}',now(),true)`);
   });
   it('enforces refund bounds, purchase dates and safe expense corrections',async()=>{
